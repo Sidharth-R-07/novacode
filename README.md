@@ -9,16 +9,16 @@ novacode reads and edits your code, runs commands, and works through tasks with 
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Novaturiente/novacode/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Sidharth-R-07/novacode/main/scripts/install.sh | sh
 ```
 
 On Windows, in PowerShell (install [Git for Windows](https://git-scm.com/download/win) first):
 
 ```powershell
-irm https://raw.githubusercontent.com/Novaturiente/novacode/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/Sidharth-R-07/novacode/main/scripts/install.ps1 | iex
 ```
 
-Or build from source: `cargo install --locked --git https://github.com/Novaturiente/novacode novacode` (needs Rust 1.97+, a C compiler and git). All the ways to install (Arch packages, building from a checkout) are in [docs/install.md](docs/install.md).
+Or build from source: `cargo install --locked --git https://github.com/Sidharth-R-07/novacode novacode` (needs Rust 1.97+, a C compiler and git). All the ways to install (Arch packages, building from a checkout) are in [docs/install.md](docs/install.md).
 
 ## First run
 
@@ -73,7 +73,7 @@ The full walk-through and a list of every flag and subcommand are in [docs/quick
 
 **Extending it:** [MCP servers](docs/mcp.md) · [Extensions](docs/extensions.md) · [Packages](docs/packages.md) · [Scripting and automation](docs/automation.md)
 
-**Reference:** [Settings](docs/config.md) · [Troubleshooting](docs/troubleshooting.md) · [Changelog](https://github.com/Novaturiente/novacode/blob/main/CHANGELOG.md)
+**Reference:** [Settings](docs/config.md) · [Troubleshooting](docs/troubleshooting.md) · [Changelog](https://github.com/Sidharth-R-07/novacode/blob/main/CHANGELOG.md)
 
 ## Files
 
@@ -88,7 +88,7 @@ Set `NOVACODE_HOME` to use a different folder than `~/.novacode`. The full list 
 
 ## Reporting a bug
 
-Run `novacode debug bundle`. It writes `novacode-debug-<ms>.tar.gz` in the current folder with logs, settings and the newest session from this folder, with secrets masked. Attach it to an issue at <https://github.com/Novaturiente/novacode/issues>. See [Troubleshooting](docs/troubleshooting.md) for more.
+Run `novacode debug bundle`. It writes `novacode-debug-<ms>.tar.gz` in the current folder with logs, settings and the newest session from this folder, with secrets masked. Attach it to an issue at <https://github.com/Sidharth-R-07/novacode/issues>. See [Troubleshooting](docs/troubleshooting.md) for more.
 
 ## Developing
 

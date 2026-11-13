@@ -1,6 +1,6 @@
 # Issue tracker: GitHub
 
-Issues and specs for this repo live as GitHub issues (`Novaturiente/novacode`, a public repo). Use the `gh` CLI for all operations.
+Issues and specs for this repo live as GitHub issues (`Sidharth-R-07/novacode`, a public repo). Use the `gh` CLI for all operations.
 
 **Private specs:** when the user asks to keep a spec off the public repo, write it to `Progress/specs/<feature>.md` instead (`Progress/` is git-ignored), with the triage label it would have had on its first line.
 

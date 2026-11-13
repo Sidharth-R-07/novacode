@@ -16,7 +16,7 @@ On Windows, novacode runs the model's commands in Git Bash, so [Git for Windows]
 ## Install a release
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Novaturiente/novacode/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Sidharth-R-07/novacode/main/scripts/install.sh | sh
 ```
 
 The script finds the latest release on GitHub, downloads the archive for your machine, checks its SHA-256 checksum, and puts `novacode` in `~/.local/bin`. It never touches `~/.novacode`. It needs `curl`, `tar` and `sha256sum` (or `shasum`). It asks GitHub's API without a token, so heavy use from one address can hit a rate limit. Prereleases are ignored.
@@ -24,7 +24,7 @@ The script finds the latest release on GitHub, downloads the archive for your ma
 | Variable | Default | Effect |
 |---|---|---|
 | `NOVACODE_BIN_DIR` | `~/.local/bin` | Where the binary goes |
-| `NOVACODE_REPO` | `Novaturiente/novacode` | GitHub repo to download from |
+| `NOVACODE_REPO` | `Sidharth-R-07/novacode` | GitHub repo to download from |
 
 If `~/.local/bin` is not on your `PATH`, the script tells you to add it. Add this line to `~/.bashrc` or `~/.zshrc` and open a new terminal:
 
@@ -37,7 +37,7 @@ export PATH="$HOME/.local/bin:$PATH"
 In PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/Novaturiente/novacode/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/Sidharth-R-07/novacode/main/scripts/install.ps1 | iex
 ```
 
 The script downloads the `.zip` for `x86_64-pc-windows-msvc`, checks its SHA-256 checksum, puts `novacode.exe` in `%LOCALAPPDATA%\novacode\bin` and adds that folder to your user `PATH` (open a new terminal afterwards). `NOVACODE_BIN_DIR` and `NOVACODE_REPO` work as above; `NOVACODE_VERSION` installs a given tag (for example `v0.6.0`) instead of the latest release. The binary needs nothing else installed except Git for Windows.
@@ -64,7 +64,7 @@ The repo has build files for two packages in `packaging/aur/`. They are not publ
 | `novacode-bin` | The prebuilt static binary |
 
 ```sh
-git clone https://github.com/Novaturiente/novacode
+git clone https://github.com/Sidharth-R-07/novacode
 cd novacode/packaging/aur/novacode-bin   # or: novacode
 makepkg -si
 ```
@@ -74,7 +74,7 @@ Both install to `/usr/bin/novacode`. To update, pull the repo and run `makepkg -
 ## With cargo
 
 ```sh
-cargo install --locked --git https://github.com/Novaturiente/novacode novacode
+cargo install --locked --git https://github.com/Sidharth-R-07/novacode novacode
 ```
 
 This builds from source and puts the binary in `~/.cargo/bin`. You need Rust 1.97 or newer (the minimum supported version), `git` and a C compiler (novacode builds SQLite and QuickJS from C).
@@ -84,7 +84,7 @@ This builds from source and puts the binary in `~/.cargo/bin`. You need Rust 1.9
 You need the same as for cargo: Rust 1.97+, `git` and a C compiler.
 
 ```sh
-git clone https://github.com/Novaturiente/novacode
+git clone https://github.com/Sidharth-R-07/novacode
 cd novacode
 cargo build --release --locked -p novacode
 ./target/release/novacode --version

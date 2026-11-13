@@ -4,6 +4,12 @@ All notable changes to novacode. Versions follow [semantic versioning](https://s
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-11-13
+
+### Changed
+
+- `novacode update`, the install scripts and the Arch packages download releases from `Sidharth-R-07/novacode`.
+
 ## [0.9.4] - 2026-11-13
 
 ### Added

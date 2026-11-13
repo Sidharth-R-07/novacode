@@ -1,11 +1,11 @@
 # Install the latest novacode release on Windows (L11.14):
-#   irm https://raw.githubusercontent.com/Novaturiente/novacode/main/scripts/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/Sidharth-R-07/novacode/main/scripts/install.ps1 | iex
 # Puts novacode.exe in $env:NOVACODE_BIN_DIR (default %LOCALAPPDATA%\novacode\bin) and adds
 # that folder to your user PATH. Verifies the checksum. Never touches ~/.novacode.
 # $env:NOVACODE_VERSION picks a tag (such as v0.5.1-rc.1) instead of the latest release.
 # novacode runs commands in Git Bash: install Git for Windows first. Update later with `novacode update`.
 $ErrorActionPreference = 'Stop'
-$repo = if ($env:NOVACODE_REPO) { $env:NOVACODE_REPO } else { 'Novaturiente/novacode' }
+$repo = if ($env:NOVACODE_REPO) { $env:NOVACODE_REPO } else { 'Sidharth-R-07/novacode' }
 $bin = if ($env:NOVACODE_BIN_DIR) { $env:NOVACODE_BIN_DIR } else { Join-Path $env:LOCALAPPDATA 'novacode\bin' }
 if (-not [Environment]::Is64BitOperatingSystem) { throw 'novacode has a release build for 64-bit Windows only' }
 $target = 'x86_64-pc-windows-msvc'

@@ -382,7 +382,7 @@ Masking changes what the model reads. It does not stop a command you allow from 
 
 ## Reporting a security issue
 
-Open an issue on the project's GitHub repository (Novaturiente/novacode). Do not paste real keys or tokens. `novacode debug bundle` collects logs and settings with secrets masked, which is safe to attach.
+Open an issue on the project's GitHub repository (Sidharth-R-07/novacode). Do not paste real keys or tokens. `novacode debug bundle` collects logs and settings with secrets masked, which is safe to attach.
 
 ## See also
 

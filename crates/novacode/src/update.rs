@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 use std::process::ExitCode;
 
 /// `owner/name` of the GitHub repo that publishes releases.
-pub const REPO: &str = "Novaturiente/novacode";
+pub const REPO: &str = "Sidharth-R-07/novacode";
 
 pub fn install_kind() -> &'static str {
     option_env!("NOVACODE_INSTALL").unwrap_or("source")
@@ -82,7 +82,7 @@ pub async fn run() -> anyhow::Result<ExitCode> {
         }
         _ => {
             println!(
-                "this is a source build; update with `git pull && cargo install --locked --path crates/novacode` in your checkout, or rerun `cargo install --locked --force --git https://github.com/Novaturiente/novacode novacode`."
+                "this is a source build; update with `git pull && cargo install --locked --path crates/novacode` in your checkout, or rerun `cargo install --locked --force --git https://github.com/Sidharth-R-07/novacode novacode`."
             );
             return Ok(ExitCode::SUCCESS);
         }

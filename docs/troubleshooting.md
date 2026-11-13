@@ -202,7 +202,7 @@ A provider that sends nothing for too long (no response headers within 120 s, or
 
 ## Report a bug
 
-Open an issue at <https://github.com/Novaturiente/novacode/issues>.
+Open an issue at <https://github.com/Sidharth-R-07/novacode/issues>.
 
 1. Make a debug bundle:
 
