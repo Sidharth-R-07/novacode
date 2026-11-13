@@ -19,6 +19,7 @@ pub mod statusline;
 pub mod term;
 pub mod theme;
 pub mod transcript;
+pub mod window;
 pub mod wrap;
 
 pub use app::{App, Cmd, Exit, Init, UiEvent};

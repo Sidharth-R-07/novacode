@@ -72,6 +72,71 @@ pub fn auth_status(p: &Providers) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// One row of `novacode accounts`.
+#[derive(serde::Serialize, Debug, PartialEq)]
+pub struct AccountRow {
+    pub provider: String,
+    pub account: String,
+    /// Picked with `/account`: new sessions start on it.
+    pub selected: bool,
+    /// Epoch ms when a saved rate limit or used-up quota ends.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exhausted_until_ms: Option<u64>,
+}
+
+/// Subscription accounts per provider, in the order a new session tries them.
+pub fn account_rows(auth: &novacode_ai::auth::AuthStore, only: Option<&str>) -> Vec<AccountRow> {
+    let mut providers: Vec<String> = auth.logins().into_iter().map(|(p, ..)| p).collect();
+    providers.dedup(); // logins() comes sorted by provider
+    providers
+        .into_iter()
+        .filter(|p| only.is_none_or(|o| o == p))
+        .flat_map(|p| {
+            let picked = auth.selected_account(&p);
+            auth.accounts(&p).into_iter().map(move |a| AccountRow {
+                selected: picked.as_ref() == Some(&a),
+                exhausted_until_ms: auth.exhausted_until(&p, &a),
+                provider: p.clone(),
+                account: a,
+            })
+        })
+        .collect()
+}
+
+/// `novacode accounts [provider] [--json]`: read locally, nothing refreshed.
+pub fn accounts(auth: &novacode_ai::auth::AuthStore, only: Option<&str>, json: bool) -> ExitCode {
+    let rows = account_rows(auth, only);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&rows).unwrap_or_default());
+        return ExitCode::SUCCESS;
+    }
+    if rows.is_empty() {
+        let p = only.unwrap_or("<provider>");
+        eprintln!(
+            "No subscription accounts. Add one with `novacode login {p} --account <name>` or `/login {p} --account <name>`."
+        );
+        return ExitCode::FAILURE;
+    }
+    let now = now_ms();
+    let w = rows.iter().map(|r| r.account.len()).max().unwrap_or(0);
+    let mut last = "";
+    for r in &rows {
+        if r.provider != last {
+            println!("{}", r.provider);
+            last = &r.provider;
+        }
+        let mut notes = Vec::new();
+        if r.selected {
+            notes.push("selected".to_string());
+        }
+        if let Some(t) = r.exhausted_until_ms {
+            notes.push(format!("used up, free again in {}", span(t.saturating_sub(now))));
+        }
+        println!("  {:w$}  {}", r.account, notes.join(", "));
+    }
+    ExitCode::SUCCESS
+}
+
 /// Check every connected provider (a model-list call: free, but it proves the
 /// credential and the endpoint), plus settings and key-binding problems.
 pub async fn doctor(
@@ -212,6 +277,37 @@ mod tests {
         let mut p = load();
         p.cli_key = Some(("openrouter".into(), "sk-test".into()));
         assert_eq!(super::auth_status(&p), ExitCode::SUCCESS);
+    }
+
+    /// `novacode accounts`: rotation order per provider, the pick and used-up accounts marked.
+    #[tokio::test]
+    async fn account_rows_follow_rotation_order() {
+        use novacode_ai::auth::{AuthStore, OAuthCredential};
+        let dir = tempfile::tempdir().unwrap();
+        let auth = AuthStore::new(dir.path().join("auth.json"));
+        let cred = || OAuthCredential {
+            access: "a".into(),
+            refresh: "r".into(),
+            expires_ms: u64::MAX / 2,
+            project: None,
+        };
+        for (p, a) in [
+            ("claude", "default"),
+            ("claude", "work"),
+            ("claude", "zed"),
+            ("codex", "default"),
+        ] {
+            auth.put(p, a, cred()).await.unwrap();
+        }
+        auth.select("claude", "zed");
+        auth.mark_exhausted("claude", "work", super::now_ms() + 60_000);
+        let rows = super::account_rows(&auth, None);
+        let names: Vec<_> = rows.iter().map(|r| format!("{}/{}", r.provider, r.account)).collect();
+        assert_eq!(names, ["claude/zed", "claude/default", "claude/work", "codex/default"]);
+        assert!(rows[0].selected && !rows[1].selected);
+        assert!(rows[2].exhausted_until_ms.is_some() && rows[0].exhausted_until_ms.is_none());
+        assert_eq!(super::account_rows(&auth, Some("codex")).len(), 1);
+        assert!(super::account_rows(&auth, Some("copilot")).is_empty());
     }
 
     #[test]

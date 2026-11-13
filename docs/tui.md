@@ -4,9 +4,15 @@ This page covers the novacode screen, the editor, slash commands, key bindings a
 
 novacode runs full screen in your terminal's alternate screen. The mouse is on: the wheel scrolls, a click folds or unfolds a tool block or thinking line, and dragging over text copies it to the clipboard. That works anywhere on screen: the chat, the status line, question and approval dialogs, pickers and the side panel (dialog borders are left out of the copy).
 
+## Panels
+
+Plain `novacode` opens the panel layout: a file tree on the left, a code editor, the chat (the AI panel) on the right, a terminal panel at the bottom (`Ctrl+Esc` or `Ctrl+T`) and git changes (`Ctrl+G`). Switch panels with `Tab`, `Alt+Arrow`, `Ctrl+Space` or a click; `F11` shows the chat full screen. `novacode edit [dir or file]` opens the same layout on another folder or a file. `/quit` in the chat closes the window (with unsaved editor changes it stays open). `novacode --chat` opens the chat alone, without the panels. Options such as `-c`, `-r <id>`, `-m <model>` and a prompt go to the chat.
+
+`/new` starts a new chat in the AI panel. `/new-window` opens another terminal window with the panels in the same folder: a tmux window inside tmux, else a window of the terminal you are in (kitty, foot, Alacritty, WezTerm, Ghostty, Konsole, GNOME Terminal), else `$TERMINAL`, else the first of those installed.
+
 ## Layout
 
-From top to bottom:
+The chat, from top to bottom:
 
 - **Transcript.** Your messages (in a box), the model's replies, tool calls and their output. Finished turns fold their steps (tool calls, notes, thinking) by default: each run of steps between two messages becomes one dim line such as `▸ 13 tool calls · 1 failed`, and the prompt and every message with text stay (`Alt+O` toggles, `ui.turnCollapse`). `Ctrl+O` shows every tool's output in full or short again. `Ctrl+T` shows or folds thinking (`ui.thinking`: `collapsed`, `full` or `hidden`). When the context is compacted, a coloured line runs across the transcript: `━━ context compacted · 182k → 41k tokens · 37 notes ━━`. It never folds away. If no notes were available, it says `no notes, earlier messages were dropped` and shows in the error colour. In a [super mode](super.md) window, the super agent's messages are framed blocks with a coloured kind badge, the time, what triggered them and a status line per task; they never fold. A `━━ new since you last looked ━━` line marks the first one that came while the terminal was unfocused or detached.
 - **Editor.** The input box. It grows up to 10 rows.
@@ -145,6 +151,7 @@ Type `/` to see the list. A line that is only `/something` unknown to novacode i
 | `/thinking` | Pick a thinking level, or `/thinking <level>` (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). The model may not offer every level. |
 | `/resume` | Resume another session from this folder. |
 | `/new` | Start a new session. |
+| `/new-window` | Open a new terminal window with the panels (files, editor, AI, terminal) in this folder. |
 | `/name <text>` | Name this session. |
 | `/worktree [name \| exit \| remove]` | Git worktrees: list them, enter or create `.worktrees/<name>`, or go back to the main checkout keeping or removing this one. See [sessions](sessions.md#worktrees). |
 | `/tree` | Jump to any prompt in the session tree. |
@@ -159,12 +166,12 @@ Type `/` to see the list. A line that is only `/something` unknown to novacode i
 | `/context` | Where the context window goes. |
 | `/docs [question]` | Add a hidden note telling the model where novacode's own docs (`~/.novacode/docs/`) and your config files are, then ask the question if you gave one. Use it to have the session set up or customise novacode. |
 | `/usage` | Tokens and cost per route, cache warming, memory workers and subscription windows. |
-| `/account [name]` | Subscription accounts of the current provider: `/account` opens a picker (active one marked), `/account <name>` sends requests to that account from the next one on. The pick is saved for new sessions and web search. See [providers](providers.md#several-accounts). |
+| `/account [name]` | Subscription accounts of the current provider: `/account` opens a picker (active one marked), `/account <name>` sends requests to that account from the next one on. The pick is saved for new sessions and web search. Accounts logged in after the session started show up without `/reload`. See [providers](providers.md#several-accounts). |
 | `/websearch [engine]` | Web search engine tried first (`auto`, `antigravity`, `gemini`, `brave`, `searxng`): `/websearch` opens a picker, `/websearch <engine>` sets it. Saved as setting `web.search`; the other engines stay as fallbacks. |
 | `/debug` | Route, cache, queues, processes, MCP and log paths, for bug reports. |
 | `/ps` | Open the process popup: one process at a time with its live output in the program's own colors (else errors red, warnings yellow, success green, URLs blue). `←`/`→` (or `h`/`l`) switch process, `↑`/`↓` (or `k`/`j`) and `PageUp`/`PageDown` scroll, `g`/`G` (or `Home`/`End`) jump to the top or back to the live tail, `Esc` or `q` closes. |
 | `/mcp` | MCP servers: status and tool counts. See [mcp](mcp.md). |
-| `/login [provider]` | Log in from a dialog: no provider = a list of all of them. Shows the sign-in URL (`Ctrl+X` copy, `Ctrl+O` open), a device code, or a box for a pasted code / API key; the session reloads after. Several accounts need `novacode login --account` on the command line. See [providers](providers.md). |
+| `/login [provider] [--account name]` | Log in from a dialog: no provider = a list of all of them. Shows the sign-in URL (`Ctrl+X` copy, `Ctrl+O` open), a device code, or a box for a pasted code / API key; the session reloads after. `--account work` adds another account of a subscription. See [providers](providers.md#several-accounts). |
 | `/keys` (or `/help`) | Show the key bindings. |
 | `/reload` | Re-read settings, keys, theme, skills, extensions, MCP servers and context files. During a turn it waits for the turn to end (`Esc` ends it sooner); the same goes for `Alt+Shift+R`. The session stays as it is: its folder (a worktree too), background processes, running subagents, the mode (plan mode…), "allow for this session" answers and which files were read. |
 | `/restart` | Restart novacode (for example after a rebuild) and resume this session. |

@@ -177,6 +177,11 @@ impl AuthStore {
             .unwrap_or_default()
     }
 
+    /// The account picked last with `/account` for `provider`, if any.
+    pub fn selected_account(&self, provider: &str) -> Option<String> {
+        self.selected().remove(provider)
+    }
+
     /// Save `account` as `provider`'s pick: new sessions and web search start on it.
     // shortcut: read-modify-write without the auth lock; two processes picking at once can lose one pick.
     pub fn select(&self, provider: &str, account: &str) {

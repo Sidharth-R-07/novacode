@@ -2,6 +2,23 @@
 
 All notable changes to novacode. Versions follow [semantic versioning](https://semver.org); before 1.0, a minor version can change default behaviour. Releases before 0.3.0 have generated notes on the [releases page](https://github.com/Novaturiente/novacode/releases).
 
+## [Unreleased]
+
+## [0.9.4] - 2026-11-13
+
+### Added
+
+- **More subscription accounts from a session**: `/login claude --account work` adds another account without leaving the TUI.
+- `novacode accounts [provider] [--json]`: subscription accounts in rotation order, with the `/account` pick and when used-up ones are free again.
+- `novacode edit [path]`: the editor layout (file tree, editor, novacode in the AI panel, terminal and git panels) built into novacode. The AI panel runs the same novacode binary.
+- `/new-window`: opens another terminal window with the panels in the same folder (tmux, the current terminal, `$TERMINAL`, or an installed one).
+
+### Changed
+
+- Plain `novacode` opens the panel layout, with the chat in the AI panel; its options (`-c`, `-r`, `-m`, a prompt) go to the chat. `novacode --chat` opens the chat alone. `/quit` in the chat closes the window.
+- `/account` and rotation pick up accounts logged in after the session started, with no `/reload`. Logged-out accounts leave the `/account` list.
+- Account names are checked on login: letters, digits, `-`, `_`, `.` (up to 64, not starting with `.`).
+
 ## [0.8.7] - 2026-11-08
 
 ### Added

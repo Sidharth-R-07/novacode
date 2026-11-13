@@ -127,15 +127,29 @@ impl Host {
         Some((p.to_string(), a, d))
     }
 
-    /// `/login <provider>`: offer the methods when there are several, else run it
-    /// in the background, reporting each step to the dialog.
-    fn login(self: &Arc<Self>, provider: String, method: Option<String>, ui: &UnboundedSender<UiEvent>) {
-        let Some(pr) = self.providers.profiles.get(&provider).cloned() else {
-            let _ = ui.send(UiEvent::LoginDone {
-                result: Err(format!("unknown provider `{provider}`")),
-            });
-            return;
+    /// `/login <provider> [--account <name>]`: offer the methods when there are several,
+    /// else run it in the background, reporting each step to the dialog.
+    fn login(
+        self: &Arc<Self>,
+        provider: String,
+        account: Option<String>,
+        method: Option<String>,
+        ui: &UnboundedSender<UiEvent>,
+    ) {
+        let fail = |e: String| {
+            let _ = ui.send(UiEvent::LoginDone { result: Err(e) });
         };
+        let Some(pr) = self.providers.profiles.get(&provider).cloned() else {
+            return fail(format!("unknown provider `{provider}`"));
+        };
+        if let Some(a) = &account {
+            if !pr.oauth() && a != novacode_ai::auth::DEFAULT_ACCOUNT {
+                return fail("API keys don't rotate, so there is one per provider (no --account)".into());
+            }
+            if let Err(e) = crate::login::check_account(a) {
+                return fail(e.to_string());
+            }
+        }
         let methods = crate::login::methods(&provider);
         if method.is_none() && methods.len() > 1 {
             let items = methods
@@ -146,7 +160,11 @@ impl Host {
                     value: v.to_string(),
                 })
                 .collect();
-            let _ = ui.send(UiEvent::LoginMethods { provider, items });
+            let _ = ui.send(UiEvent::LoginMethods {
+                provider,
+                account,
+                items,
+            });
             return;
         }
         let (tx, input) = tokio::sync::mpsc::unbounded_channel();
@@ -170,7 +188,7 @@ impl Host {
                 crate::login::oauth(
                     &me.providers.auth,
                     &provider,
-                    novacode_ai::auth::DEFAULT_ACCOUNT,
+                    account.as_deref().unwrap_or(novacode_ai::auth::DEFAULT_ACCOUNT),
                     &method,
                     &mut io,
                 )
@@ -523,7 +541,11 @@ impl Host {
                     items: crate::login::providers(&self.providers),
                 });
             }
-            Cmd::Login { provider, method } => self.login(provider, method, ui),
+            Cmd::Login {
+                provider,
+                account,
+                method,
+            } => self.login(provider, account, method, ui),
             Cmd::LoginInput(s) => {
                 if let Some((tx, _)) = &*self.login.lock().unwrap() {
                     let _ = tx.send(s);

@@ -19,6 +19,7 @@ highlight = ["novacode-tui/highlight"]
 novacode-base.workspace = true
 novacode-core.workspace = true
 novacode-tui.workspace = true
+novacode-editor.workspace = true
 novacode-tools.workspace = true
 anyhow.workspace = true
 regex = "1"

@@ -83,6 +83,7 @@ Type `/` to see the slash commands. The ones you will use first:
 | `/thinking` | Pick a thinking level, or `/thinking <level>` |
 | `/resume` | Resume another session in this folder |
 | `/new` | Start a new session |
+| `/new-window` | Open a new window with the panels (files, editor, AI, terminal) |
 | `/login [provider]` | Log in without leaving novacode (no provider = pick from a list) |
 | `/keys` | Show key bindings |
 | `/quit` | Quit |
@@ -151,6 +152,7 @@ Both exit with `1` when nothing is connected (`doctor` also when it finds a prob
 | `login [PROVIDER] [--account NAME] [--method browser\|code\|device]` | Log in to a subscription, or save an API key (no provider: pick from a list). `--account` is for subscriptions only |
 | `logout PROVIDER [--account NAME]` | Remove a login |
 | `models [FILTER] [--all] [--refresh]` | List models; `--refresh` updates the catalog |
+| `accounts [PROVIDER] [--json]` | List subscription accounts in rotation order, with the `/account` pick and used-up ones |
 | `auth status` | Show logins and keys |
 | `doctor` | Check providers, settings and key bindings |
 | `export [SESSION] [--html] [-o FILE]` | Export a session as JSONL or HTML |

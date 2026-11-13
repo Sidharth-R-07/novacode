@@ -124,6 +124,9 @@ struct Cli {
     /// API key for the model's provider, for this run only (ahead of saved and env keys).
     #[arg(long, value_name = "KEY")]
     api_key: Option<String>,
+    /// Chat only: no file tree, editor and terminal panels around it.
+    #[arg(long)]
+    chat: bool,
     /// Start the interactive session with this prompt (`novacode "fix the build"`).
     #[arg(value_name = "PROMPT")]
     initial: Option<String>,
@@ -169,6 +172,12 @@ enum Command {
         #[arg(long)]
         method: Option<String>,
     },
+    /// Open the editor layout: file tree, editor, novacode in the AI panel,
+    /// terminal and git panels.
+    Edit {
+        /// A directory to open as the project, or a file to edit (default: the current directory)
+        path: Option<std::path::PathBuf>,
+    },
     /// Remove a stored login (one account with --account, else all of them).
     Logout {
         /// The provider to log out of
@@ -187,6 +196,15 @@ enum Command {
         /// Download the newest model catalog first
         #[arg(long)]
         refresh: bool,
+    },
+    /// List subscription accounts per provider, in rotation order: the `/account`
+    /// pick and accounts that are used up (and when they are free again).
+    Accounts {
+        /// Only this provider (claude, codex, antigravity, copilot)
+        provider: Option<String>,
+        /// Print JSON: provider, account, selected, exhausted_until_ms
+        #[arg(long)]
+        json: bool,
     },
     /// Show logins and keys (`auth status`).
     Auth {
@@ -661,8 +679,35 @@ fn fail(e: anyhow::Error) -> ExitCode {
     ExitCode::from(1)
 }
 
+/// Plain interactive `novacode` opens the panel layout, with the chat in its AI panel.
+/// Not inside that panel (`NOVA_EDIT`, set by the layout), with `--chat`, a
+/// subcommand, or a mode without a window (print, rpc, background, super).
+fn wants_panels(cli: &Cli) -> bool {
+    cli.command.is_none()
+        && !cli.chat
+        && cli.print.is_none()
+        && !cli.rpc
+        && cli.bg.is_none()
+        && !cli.super_
+        && !cli.super_serve
+        && cli.agent.is_none()
+        && !cli.profile_startup
+        && std::env::var_os("NOVA_EDIT").is_none()
+        && std::io::stdin().is_terminal()
+        && std::io::stdout().is_terminal()
+}
+
 async fn run(mut cli: Cli, paths: Paths) -> anyhow::Result<ExitCode> {
     let auth_store = AuthStore::new(paths.home().join("auth.json"));
+    if wants_panels(&cli) {
+        if let Ok(exe) = std::env::current_exe() {
+            novacode_editor::set_agent_program(exe);
+        }
+        // The chat in the AI panel starts with this command's own options (-c, -m, a prompt…).
+        novacode_editor::set_agent_args(std::env::args_os().skip(1).collect());
+        novacode_editor::run(None).await?;
+        return Ok(ExitCode::SUCCESS);
+    }
     match cli.command {
         Some(Command::Login {
             provider,
@@ -685,7 +730,16 @@ async fn run(mut cli: Cli, paths: Paths) -> anyhow::Result<ExitCode> {
                 }
                 return key_login(p, &provider, paths.home()).await;
             }
+            login::check_account(&account)?;
             return login(&auth_store, &provider, &account, method.as_deref()).await;
+        }
+        Some(Command::Edit { path }) => {
+            // The AI panel runs this same novacode build, not whichever one is on PATH.
+            if let Ok(exe) = std::env::current_exe() {
+                novacode_editor::set_agent_program(exe);
+            }
+            novacode_editor::run(path).await?;
+            return Ok(ExitCode::SUCCESS);
         }
         Some(Command::Logout { provider, account }) => {
             let had = auth_store.remove(&provider, account.as_deref()).await?;
@@ -698,6 +752,9 @@ async fn run(mut cli: Cli, paths: Paths) -> anyhow::Result<ExitCode> {
                 }
             );
             return Ok(ExitCode::SUCCESS);
+        }
+        Some(Command::Accounts { provider, json }) => {
+            return Ok(doctor::accounts(&auth_store, provider.as_deref(), json));
         }
         Some(Command::Auth { what: AuthCmd::Status }) | Some(Command::Doctor) => {
             let cwd = std::env::current_dir()?;

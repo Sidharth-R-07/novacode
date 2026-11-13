@@ -4,6 +4,9 @@
 //! (quota, or a rate limit longer than the retry policy waits) before any
 //! output, it moves on to the provider's next logged-in account and stays
 //! there. `/account` switches by hand; rotation still applies afterwards.
+//! Accounts logged in after the session started (`novacode login --account`
+//! elsewhere) join the list on the next request or `/account`; the list only
+//! grows, so an index stays the same account for the session's life.
 //! It never falls back to a metered API key.
 
 use crate::adapter::{Adapter, Builder, EVENT_BUFFER, Request};
@@ -26,7 +29,8 @@ pub struct Live {
 struct Inner {
     providers: Arc<Providers>,
     provider: String,
-    accounts: Vec<String>,
+    /// Append-only (see the module doc); a logged-out account stays and fails over.
+    accounts: Mutex<Vec<String>>,
     current: AtomicUsize,
     /// The current account's name, for the tmux pane and status (L8.14, L8.15).
     named: tokio::sync::watch::Sender<String>,
@@ -75,7 +79,7 @@ impl Live {
             inner: Arc::new(Inner {
                 provider: provider.into(),
                 named: tokio::sync::watch::Sender::new(accounts[0].clone()),
-                accounts,
+                accounts: Mutex::new(accounts),
                 current: AtomicUsize::new(0),
                 trace,
                 cached: Mutex::new(Some((0, token, first))),
@@ -88,7 +92,7 @@ impl Live {
 
     /// The account requests go to now.
     pub fn account(&self) -> String {
-        self.inner.accounts[self.inner.current.load(Ordering::Relaxed)].clone()
+        self.inner.name(self.inner.current.load(Ordering::Relaxed))
     }
 }
 
@@ -126,24 +130,55 @@ fn exhausted(stop: &StopReason) -> bool {
 }
 
 impl Inner {
+    fn name(&self, i: usize) -> String {
+        self.accounts.lock().unwrap()[i].clone()
+    }
+
+    fn count(&self) -> usize {
+        self.accounts.lock().unwrap().len()
+    }
+
+    /// Add accounts logged in since the list was last read (at the end, so indexes hold).
+    fn refresh(&self) {
+        let fresh = self.providers.auth.accounts(&self.provider);
+        let mut a = self.accounts.lock().unwrap();
+        for x in fresh {
+            if !a.contains(&x) {
+                a.push(x);
+            }
+        }
+    }
+
+    /// The accounts to offer: still logged in, plus the current one.
+    fn listed(&self) -> Vec<String> {
+        self.refresh();
+        let live = self.providers.auth.accounts(&self.provider);
+        let cur = self.name(self.current.load(Ordering::Relaxed));
+        let all = self.accounts.lock().unwrap().clone();
+        if live.is_empty() {
+            return all;
+        }
+        all.into_iter().filter(|a| *a == cur || live.contains(a)).collect()
+    }
+
     fn set_current(&self, i: usize) {
         self.current.store(i, Ordering::Relaxed);
-        self.named.send_replace(self.accounts[i].clone());
+        self.named.send_replace(self.name(i));
     }
 
     /// The first account after `i` not inside a saved rate-limit window.
     fn next_free(&self, i: usize) -> Option<usize> {
-        let n = self.accounts.len();
+        let n = self.count();
         (1..n).map(|k| (i + k) % n).find(|&j| {
             self.providers
                 .auth
-                .exhausted_until(&self.provider, &self.accounts[j])
+                .exhausted_until(&self.provider, &self.name(j))
                 .is_none()
         })
     }
 
     async fn adapter(&self, i: usize) -> Result<Arc<dyn Adapter>, AuthFailure> {
-        let account = &self.accounts[i];
+        let account = &self.name(i);
         #[cfg(test)]
         if let Some(f) = *self.fault.lock().unwrap() {
             return Err(auth_failure(&f()));
@@ -170,14 +205,15 @@ impl Inner {
     }
 
     async fn run(&self, req: Request, cancel: CancellationToken, tx: mpsc::Sender<StreamEvent>) {
-        let n = self.accounts.len();
+        self.refresh();
+        let n = self.count();
         // The current account is known to be out (another process or the observer hit
         // it): start on a free one instead of spending a request on a 429.
         let i = self.current.load(Ordering::Relaxed);
         if self
             .providers
             .auth
-            .exhausted_until(&self.provider, &self.accounts[i])
+            .exhausted_until(&self.provider, &self.name(i))
             .is_some()
             && let Some(j) = self.next_free(i)
         {
@@ -188,11 +224,11 @@ impl Inner {
             let a = match self.adapter(i).await {
                 Ok(a) => a,
                 Err((kind, rotate, e)) => {
-                    let msg = format!("{} account `{}`: {e}", self.provider, self.accounts[i]);
+                    let msg = format!("{} account `{}`: {e}", self.provider, self.name(i));
                     // A broken login (e.g. a revoked refresh token) shouldn't block a working account.
                     if rotate && tried + 1 < n {
                         let next = (i + 1) % n;
-                        let note = format!("{msg}; switched to account `{}`", self.accounts[next]);
+                        let note = format!("{msg}; switched to account `{}`", self.name(next));
                         if tx.send(StreamEvent::Notice { text: note }).await.is_err() {
                             return;
                         }
@@ -220,7 +256,7 @@ impl Inner {
                     };
                     self.providers
                         .auth
-                        .mark_exhausted(&self.provider, &self.accounts[i], now_ms() + wait);
+                        .mark_exhausted(&self.provider, &self.name(i), now_ms() + wait);
                 }
                 // Rotate only to an account not known to be out: when all are, one
                 // request fails fast instead of one per account.
@@ -233,15 +269,17 @@ impl Inner {
                     let why = m.error_message.as_deref().unwrap_or("used up");
                     let note = format!(
                         "{} account `{}` is exhausted ({why}); switched to account `{}`",
-                        self.provider, self.accounts[i], self.accounts[next]
+                        self.provider,
+                        self.name(i),
+                        self.name(next)
                     );
                     if tx.send(StreamEvent::Notice { text: note }).await.is_err() {
                         return;
                     }
                     tracing::warn!(
                         provider = %self.provider,
-                        from = %self.accounts[i],
-                        to = %self.accounts[next],
+                        from = %self.name(i),
+                        to = %self.name(next),
                         "account exhausted, rotating"
                     );
                     self.set_current(next);
@@ -264,7 +302,7 @@ impl Inner {
                     m.error_message = Some(format!(
                         "{} account `{}`: {} ({wait}). Add another account with `novacode login {} --account <name>`, or switch model with /model.",
                         self.provider,
-                        self.accounts[i],
+                        self.name(i),
                         m.error_message.as_deref().unwrap_or("rate limited"),
                         self.provider
                     ));
@@ -295,17 +333,24 @@ impl Adapter for Live {
     }
 
     fn accounts(&self) -> Vec<String> {
-        self.inner.accounts.clone()
+        self.inner.listed()
     }
 
     fn switch_account(&self, name: &str) -> Result<(), String> {
-        let i = self.inner.accounts.iter().position(|a| a == name).ok_or_else(|| {
-            format!(
-                "no {} account `{name}` in this session (accounts: {})",
-                self.inner.provider,
-                self.inner.accounts.join(", ")
-            )
-        })?;
+        let listed = self.inner.listed();
+        let i = listed
+            .iter()
+            .any(|a| a == name)
+            .then(|| self.inner.accounts.lock().unwrap().iter().position(|a| a == name))
+            .flatten()
+            .ok_or_else(|| {
+                format!(
+                    "no {} account `{name}` (accounts: {}); add one with `/login {} --account {name}`",
+                    self.inner.provider,
+                    listed.join(", "),
+                    self.inner.provider
+                )
+            })?;
         self.inner.set_current(i);
         self.inner.providers.auth.select(&self.inner.provider, name);
         Ok(())
@@ -547,6 +592,40 @@ mod tests {
         let e = a.switch_account("nope").unwrap_err();
         assert!(e.contains("accounts: default, work"), "{e}");
         assert_eq!(a.account(), "default");
+    }
+
+    /// A login made after the session started shows up in `/account` without a reload;
+    /// a logged-out one leaves the picker unless it is the current account.
+    #[tokio::test]
+    async fn new_logins_join_and_logouts_leave_the_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let sub = r#"{ "providers": { "sub": { "name": "Sub", "api": "openai-chat", "auth": "oauth", "baseUrl": "http://127.0.0.1:1" } } }"#;
+        std::fs::write(&path, sub).unwrap();
+        let p = Arc::new(Providers::load(dir.path(), &Settings::load(&path, None, false)));
+        let cred = |t: &str| OAuthCredential {
+            access: t.into(),
+            refresh: "r".into(),
+            expires_ms: u64::MAX / 2,
+            project: None,
+        };
+        p.auth.put("sub", "default", cred("a")).await.unwrap();
+        let (first, _) = p.adapter_for("sub", "default", None).await.unwrap();
+        let a = Live::new(p.clone(), "sub", p.auth.accounts("sub"), None, first);
+        assert_eq!(a.accounts(), ["default"]);
+        assert!(a.switch_account("work").unwrap_err().contains("--account work"));
+
+        p.auth.put("sub", "work", cred("b")).await.unwrap();
+        assert_eq!(a.accounts(), ["default", "work"]);
+        a.switch_account("work").unwrap();
+        assert_eq!(a.account(), "work");
+
+        // Logged out: the current account stays listed, another one doesn't.
+        p.auth.remove("sub", Some("work")).await.unwrap();
+        assert_eq!(a.accounts(), ["default", "work"]);
+        a.switch_account("default").unwrap();
+        assert_eq!(a.accounts(), ["default"]);
+        assert!(a.switch_account("work").is_err());
     }
 
     #[tokio::test]

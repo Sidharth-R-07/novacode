@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.8.7"
+version = "0.9.4"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.97"
@@ -17,6 +17,7 @@ novacode-tools = { path = "crates/novacode-tools", default-features = false }
 novacode-script = { path = "crates/novacode-script" }
 novacode-core = { path = "crates/novacode-core" }
 novacode-tui = { path = "crates/novacode-tui", default-features = false }
+novacode-editor = { path = "crates/novacode-editor" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 thiserror = "2"

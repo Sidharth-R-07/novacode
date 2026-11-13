@@ -51,6 +51,21 @@ pub fn methods(provider: &str) -> &'static [(&'static str, &'static str, &'stati
     }
 }
 
+/// An account name is a key in auth.json and part of a cache file name
+/// (`usage/<provider>-<account>.json`): letters, digits, `-`, `_` and `.` only.
+pub fn check_account(name: &str) -> anyhow::Result<()> {
+    let ok = !name.is_empty()
+        && name.len() <= 64
+        && !name.starts_with('.')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+    if !ok {
+        bail!("account name `{name}`: use letters, digits, `-`, `_` or `.` (up to 64, not starting with `.`)");
+    }
+    Ok(())
+}
+
 /// Every provider you can log in to, subscriptions first, each marked if already connected.
 pub fn providers(p: &Providers) -> Vec<PickItem> {
     let mut v: Vec<&Profile> = p
@@ -348,6 +363,16 @@ fn percent_decode(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn account_names() {
+        for ok in ["default", "work", "me.2", "a_b-c"] {
+            assert!(check_account(ok).is_ok(), "{ok}");
+        }
+        for bad in ["", ".hidden", "a/b", "a b", "../x", "é", &"x".repeat(65)] {
+            assert!(check_account(bad).is_err(), "{bad}");
+        }
+    }
 
     #[test]
     fn percent_decoding() {

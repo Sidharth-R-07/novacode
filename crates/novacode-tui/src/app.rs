@@ -36,6 +36,10 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ("/thinking", "pick a thinking level, or /thinking <level>"),
     ("/resume", "resume another session in this folder"),
     ("/new", "start a new session"),
+    (
+        "/new-window",
+        "open a new terminal window with the panels (files, editor, AI, terminal) in this folder",
+    ),
     ("/keys", "show keybindings"),
     ("/context", "where the context window goes"),
     (
@@ -61,7 +65,7 @@ pub const COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "/login",
-        "log in: pick a provider, or /login <provider> (claude, codex, antigravity, copilot, or an API-key one)",
+        "log in: pick a provider, or /login <provider> [--account <name>] (claude, codex, antigravity, copilot, or an API-key one)",
     ),
     (
         "/ps",
@@ -183,8 +187,10 @@ pub enum Cmd {
     /// `/login` with no provider: the host answers with [`UiEvent::LoginList`].
     LoginList,
     /// Start a login; no method = the host offers the methods when there are several.
+    /// `account` names another subscription account (`/login claude --account work`); none = `default`.
     Login {
         provider: String,
+        account: Option<String>,
         method: Option<String>,
     },
     /// A pasted code, redirect URL or API key for the running login.
@@ -277,6 +283,7 @@ pub enum UiEvent {
     },
     LoginMethods {
         provider: String,
+        account: Option<String>,
         items: Vec<PickItem>,
     },
     LoginStep {
@@ -407,8 +414,8 @@ enum Overlay {
     LoginPick(Picker),
     /// [`UiEvent::Pick`]: the command the picked value goes to.
     CommandPick(String, Picker),
-    /// How to log in to this provider (browser or a code).
-    LoginMethod(String, Picker),
+    /// How to log in to this provider (browser or a code), and the account to save it as.
+    LoginMethod(String, Option<String>, Picker),
     Login(crate::login::LoginView),
     /// `/ps`: one process's live output.
     Procs(crate::procs::ProcPopup),
@@ -728,9 +735,16 @@ impl App {
                 }
                 self.overlay = Some(Overlay::CommandPick(command, Picker::new(title, items)));
             }
-            UiEvent::LoginMethods { provider, items } => {
-                let title = format!("Log in to {provider}");
-                self.overlay = Some(Overlay::LoginMethod(provider, Picker::new(title, items)));
+            UiEvent::LoginMethods {
+                provider,
+                account,
+                items,
+            } => {
+                let title = match &account {
+                    Some(a) => format!("Log in to {provider} (account `{a}`)"),
+                    None => format!("Log in to {provider}"),
+                };
+                self.overlay = Some(Overlay::LoginMethod(provider, account, Picker::new(title, items)));
             }
             UiEvent::LoginStep { provider, step } => match &mut self.overlay {
                 Some(Overlay::Login(v)) if v.provider == provider => v.step(step),
@@ -1360,7 +1374,7 @@ impl App {
                 | Overlay::RewindMode(_, p)
                 | Overlay::LoginPick(p)
                 | Overlay::CommandPick(_, p)
-                | Overlay::LoginMethod(_, p) => match p.handle(k, &self.keymap) {
+                | Overlay::LoginMethod(_, _, p) => match p.handle(k, &self.keymap) {
                     Picked::Pending => {}
                     Picked::Cancel => self.overlay = None,
                     Picked::Value(v) => {
@@ -1370,11 +1384,13 @@ impl App {
                             Some(Overlay::Thinking(_)) => self.set_thinking(&v),
                             Some(Overlay::LoginPick(_)) => self.send(Cmd::Login {
                                 provider: v,
+                                account: None,
                                 method: None,
                             }),
                             Some(Overlay::CommandPick(command, _)) => self.send(Cmd::Prompt(format!("{command} {v}"))),
-                            Some(Overlay::LoginMethod(provider, _)) => self.send(Cmd::Login {
+                            Some(Overlay::LoginMethod(provider, account, _)) => self.send(Cmd::Login {
                                 provider,
+                                account,
                                 method: Some(v),
                             }),
                             Some(Overlay::Branch(BranchAction::Rewind, _)) if v == "undo" => {
@@ -1833,6 +1849,10 @@ impl App {
                 "/thinking" => self.pick_thinking(),
                 "/resume" => self.send(Cmd::ListSessions),
                 "/new" => self.exit = Some(Exit::New),
+                "/new-window" => match crate::window::open(&self.init.cwd) {
+                    Ok(m) => self.flash(m),
+                    Err(e) => self.tr.notice(format!("/new-window: {e}"), true),
+                },
                 "/reload" => self.reload(),
                 "/ps" => self.open_procs(None),
                 "/mcp" => self.send(Cmd::Mcp),
@@ -1853,10 +1873,14 @@ impl App {
                 "/name" if !arg.is_empty() => self.send(Cmd::Rename(arg.to_string())),
                 "/name" => self.flash("usage: /name <text>"),
                 "/worktree" => self.send(Cmd::Worktree(arg.to_string())),
-                "/login" if !arg.is_empty() => self.send(Cmd::Login {
-                    provider: arg.to_string(),
-                    method: None,
-                }),
+                "/login" if !arg.is_empty() => match parse_login(arg) {
+                    Ok((provider, account)) => self.send(Cmd::Login {
+                        provider,
+                        account,
+                        method: None,
+                    }),
+                    Err(e) => self.flash(&e),
+                },
                 "/login" => self.send(Cmd::LoginList),
                 "/context" => self.send(Cmd::Context),
                 "/docs" => {
@@ -1919,9 +1943,12 @@ impl App {
     }
 
     fn scroll_by(&mut self, delta: isize) {
-        let Some(s) = &self.shown else { return };
+        let Some(s) = &mut self.shown else { return };
         let max_top = s.view.lines.len().saturating_sub(s.area.height as usize);
         let top = (s.top as isize + delta).clamp(0, max_top as isize) as usize;
+        // Several wheel reports can arrive before the next draw; each must start
+        // where the last one left off, not at the last drawn top.
+        s.top = top;
         if top >= max_top {
             self.anchor = None;
             return;
@@ -2288,7 +2315,7 @@ impl App {
                 | Overlay::RewindMode(_, p)
                 | Overlay::LoginPick(p)
                 | Overlay::CommandPick(_, p)
-                | Overlay::LoginMethod(_, p),
+                | Overlay::LoginMethod(_, _, p),
             ) => p.render(f, dialog::centered(main, 70, 70, 20), t),
             Some(Overlay::Login(v)) => {
                 let w = (main.width * 80 / 100).max(20);
@@ -2777,6 +2804,23 @@ fn watch_shell(cmds: &[Vec<String>]) -> String {
     format!("tmux {}", args.join(" "))
 }
 
+/// `/login <provider> [--account <name>]` → (provider, account).
+fn parse_login(arg: &str) -> Result<(String, Option<String>), String> {
+    const USAGE: &str = "usage: /login <provider> [--account <name>]";
+    let mut words = arg.split_whitespace();
+    let provider = words.next().filter(|p| !p.starts_with('-')).ok_or(USAGE)?;
+    let account = match (words.next(), words.next()) {
+        (None, _) => None,
+        (Some("--account"), Some(a)) => Some(a),
+        (Some(w), None) => Some(w.strip_prefix("--account=").ok_or(USAGE)?),
+        _ => return Err(USAGE.into()),
+    };
+    if words.next().is_some() || account.is_some_and(str::is_empty) {
+        return Err(USAGE.into());
+    }
+    Ok((provider.to_string(), account.map(str::to_string)))
+}
+
 /// The attach command to run by hand, with this window's home when it isn't the default.
 fn attach_cmd(session: &str, home: Option<&str>) -> String {
     match home {
@@ -2787,6 +2831,24 @@ fn attach_cmd(session: &str, home: Option<&str>) -> String {
 
 #[cfg(test)]
 mod screen_tests {
+    #[test]
+    fn login_takes_an_account() {
+        use super::parse_login;
+        let ok = |p: &str, a: Option<&str>| Ok((p.to_string(), a.map(str::to_string)));
+        assert_eq!(parse_login("claude"), ok("claude", None));
+        assert_eq!(parse_login("claude --account work"), ok("claude", Some("work")));
+        assert_eq!(parse_login("claude --account=work"), ok("claude", Some("work")));
+        for bad in [
+            "--account work",
+            "claude work",
+            "claude --account",
+            "claude --account=",
+            "claude --account a b",
+        ] {
+            assert!(parse_login(bad).is_err(), "{bad}");
+        }
+    }
+
     #[test]
     fn copies_screen_text_without_borders() {
         use ratatui::buffer::Buffer;
