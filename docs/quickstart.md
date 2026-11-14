@@ -82,7 +82,7 @@ Type `/` to see the slash commands. The ones you will use first:
 | `/model` | Pick a model, or `/model <id>` |
 | `/thinking` | Pick a thinking level, or `/thinking <level>` |
 | `/resume` | Resume another session in this folder |
-| `/new` | Start a new session |
+| `/new` | Start a new session (in the panel layout: in a new chat tab) |
 | `/new-window` | Open a new window with the panels (files, editor, AI, terminal) |
 | `/login [provider]` | Log in without leaving novacode (no provider = pick from a list) |
 | `/keys` | Show key bindings |

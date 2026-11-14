@@ -6,9 +6,9 @@ novacode runs full screen in your terminal's alternate screen. The mouse is on: 
 
 ## Panels
 
-Plain `novacode` opens the panel layout: a file tree on the left, a code editor, the chat (the AI panel) on the right, a terminal panel at the bottom (`Ctrl+Esc` or `Ctrl+T`) and git changes (`Ctrl+G`). Switch panels with `Tab`, `Alt+Arrow`, `Ctrl+Space` or a click; `F11` shows the chat full screen. `novacode edit [dir or file]` opens the same layout on another folder or a file. `/quit` in the chat closes the window (with unsaved editor changes it stays open). `novacode --chat` opens the chat alone, without the panels. Options such as `-c`, `-r <id>`, `-m <model>` and a prompt go to the chat.
+Plain `novacode` opens the panel layout: a file tree on the left, a code editor, the chat (the AI panel) on the right, a terminal panel at the bottom (`Ctrl+Esc` or `Ctrl+T`) and git changes (`Ctrl+G`). Switch panels with `Tab`, `Alt+Arrow`, `Ctrl+Space` or a click; `F11` shows the chat full screen. `Alt+T` hides or shows the file tree and `Alt+E` the editor, from any panel (`Ctrl+B` and `Ctrl+E` outside the chat). `novacode edit [dir or file]` opens the same layout on another folder or a file. `/quit` in the chat closes the window (with unsaved editor changes it stays open). `novacode --chat` opens the chat alone, without the panels. Options such as `-c`, `-r <id>`, `-m <model>` and a prompt go to the chat.
 
-`/new` starts a new chat in the AI panel. `/new-window` opens another terminal window with the panels in the same folder: a tmux window inside tmux, else a window of the terminal you are in (kitty, foot, Alacritty, WezTerm, Ghostty, Konsole, GNOME Terminal), else `$TERMINAL`, else the first of those installed.
+`/new` in the AI panel opens a new chat in a new tab; the chat you were in keeps running. With more than one chat, numbered tabs show on the AI panel's top edge: click one, or press `Alt+1`…`Alt+9` to go to a tab, `Alt+,` / `Alt+.` for the previous / next one, `Alt+N` for a new chat from any panel. `/quit` in a tab closes that tab only; in the last one it closes the window. `/new-window` opens another terminal window with the panels in the same folder: a tmux window inside tmux, else a window of the terminal you are in (kitty, foot, Alacritty, WezTerm, Ghostty, Konsole, GNOME Terminal), else `$TERMINAL`, else the first of those installed.
 
 ## Layout
 
@@ -150,7 +150,7 @@ Type `/` to see the list. A line that is only `/something` unknown to novacode i
 | `/model` | Pick a model, or `/model <provider/model>`. |
 | `/thinking` | Pick a thinking level, or `/thinking <level>` (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). The model may not offer every level. |
 | `/resume` | Resume another session from this folder. |
-| `/new` | Start a new session. |
+| `/new` | Start a new session (in the panel layout: in a new chat tab). |
 | `/new-window` | Open a new terminal window with the panels (files, editor, AI, terminal) in this folder. |
 | `/name <text>` | Name this session. |
 | `/worktree [name \| exit \| remove]` | Git worktrees: list them, enter or create `.worktrees/<name>`, or go back to the main checkout keeping or removing this one. See [sessions](sessions.md#worktrees). |

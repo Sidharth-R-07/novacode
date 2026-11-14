@@ -16,8 +16,18 @@ use vt100::{MouseProtocolEncoding, MouseProtocolMode};
 
 pub enum AgentEvent {
     Output(Vec<u8>),
+    /// The hosted novacode asked for a new chat tab (`/new`).
+    NewTab,
     Exited,
 }
+
+/// Events go out tagged with the id of the program they came from, so one
+/// channel can carry several chat tabs.
+pub type EventTx = UnboundedSender<(u64, AgentEvent)>;
+
+/// What a chat in the AI panel writes to ask for a new chat tab; the same as
+/// `novacode_tui::window::NEW_TAB_OSC`.
+const NEW_TAB_OSC: &[u8] = b"\x1b]7771;novacode;new-tab\x07";
 
 type Writer = Arc<Mutex<Box<dyn Write + Send>>>;
 
@@ -35,22 +45,24 @@ pub struct Agent {
     child: Box<dyn Child + Send + Sync>,
     size: (u16, u16),
     pub exited: bool,
+    /// The tag on this program's events.
+    pub id: u64,
 }
 
 impl Agent {
     /// Start `novacode` in `root`. `rows`/`cols` is the pane size to begin with.
-    pub fn spawn(root: &Path, rows: u16, cols: u16, tx: UnboundedSender<AgentEvent>) -> Result<Self, String> {
+    pub fn spawn(root: &Path, rows: u16, cols: u16, tx: EventTx, id: u64) -> Result<Self, String> {
         let program = PROGRAM.get().map_or(OsStr::new("novacode"), OsString::as_os_str);
         let args = std::mem::take(&mut *FIRST_ARGS.lock().unwrap_or_else(|e| e.into_inner()));
-        Self::spawn_inner(program, &args, root, rows, cols, tx, 0)
+        Self::spawn_inner(program, &args, root, (rows, cols), tx, id, 0)
     }
 
     /// The user's shell (`$SHELL`, else `sh`) in `root`, for the terminal panel.
     /// It keeps some scrollback so the wheel can look back.
-    pub fn spawn_shell(root: &Path, rows: u16, cols: u16, tx: UnboundedSender<AgentEvent>) -> Result<Self, String> {
+    pub fn spawn_shell(root: &Path, rows: u16, cols: u16, tx: EventTx) -> Result<Self, String> {
         let shell = std::env::var("SHELL").ok().filter(|s| !s.is_empty());
         let shell = shell.as_deref().unwrap_or("sh");
-        Self::spawn_inner(OsStr::new(shell), &[], root, rows, cols, tx, 5000)
+        Self::spawn_inner(OsStr::new(shell), &[], root, (rows, cols), tx, 0, 5000)
     }
 
     /// `spawn` with another program in the pane (tests host a stand-in).
@@ -60,18 +72,19 @@ impl Agent {
         root: &Path,
         rows: u16,
         cols: u16,
-        tx: UnboundedSender<AgentEvent>,
+        tx: EventTx,
+        id: u64,
     ) -> Result<Self, String> {
-        Self::spawn_inner(OsStr::new(program), &[], root, rows, cols, tx, 0)
+        Self::spawn_inner(OsStr::new(program), &[], root, (rows, cols), tx, id, 0)
     }
 
     fn spawn_inner(
         program: &OsStr,
         args: &[OsString],
         root: &Path,
-        rows: u16,
-        cols: u16,
-        tx: UnboundedSender<AgentEvent>,
+        (rows, cols): (u16, u16),
+        tx: EventTx,
+        id: u64,
         scrollback: usize,
     ) -> Result<Self, String> {
         let (rows, cols) = (rows.max(2), cols.max(10));
@@ -105,18 +118,23 @@ impl Agent {
         std::thread::spawn(move || {
             let mut buf = [0u8; 16 * 1024];
             let mut carry: Vec<u8> = Vec::new();
+            let mut tab_carry: Vec<u8> = Vec::new();
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) | Err(_) => break,
                     Ok(n) => {
                         answer_queries(&mut carry, &buf[..n], &reply, (rows, cols));
-                        if tx.send(AgentEvent::Output(buf[..n].to_vec())).is_err() {
+                        let tabs = count_new_tabs(&mut tab_carry, &buf[..n]);
+                        if tx.send((id, AgentEvent::Output(buf[..n].to_vec()))).is_err() {
                             return;
+                        }
+                        for _ in 0..tabs {
+                            let _ = tx.send((id, AgentEvent::NewTab));
                         }
                     }
                 }
             }
-            let _ = tx.send(AgentEvent::Exited);
+            let _ = tx.send((id, AgentEvent::Exited));
         });
 
         Ok(Self {
@@ -126,6 +144,7 @@ impl Agent {
             child,
             size: (rows, cols),
             exited: false,
+            id,
         })
     }
 
@@ -250,6 +269,25 @@ fn answer_queries(carry: &mut Vec<u8>, chunk: &[u8], w: &Writer, size: (u16, u16
     }
     let keep = data.len().saturating_sub(8);
     *carry = data[keep..].to_vec();
+}
+
+/// How many new-tab requests end in `chunk`; a request split across reads is
+/// found through the bytes kept in `carry`.
+fn count_new_tabs(carry: &mut Vec<u8>, chunk: &[u8]) -> usize {
+    let old = carry.len();
+    let mut data = std::mem::take(carry);
+    data.extend_from_slice(chunk);
+    let (mut n, mut from) = (0, 0);
+    while let Some(p) = find(&data[from..], NEW_TAB_OSC) {
+        let end = from + p + NEW_TAB_OSC.len();
+        if end > old {
+            n += 1;
+        }
+        from = end;
+    }
+    let keep = data.len().saturating_sub(NEW_TAB_OSC.len() - 1).max(from);
+    *carry = data[keep..].to_vec();
+    n
 }
 
 fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
@@ -455,6 +493,18 @@ mod tests {
         assert_eq!(x10(K::Up(left)), b"\x1b[M\x23\x21\x21");
         let far = encode_mouse(K::Down(left), none, (300, 0), motion, MouseProtocolEncoding::Default);
         assert!(far.is_empty(), "column 301 does not fit in a byte");
+    }
+
+    #[test]
+    fn finds_new_tab_requests_even_when_split() {
+        let mut carry = Vec::new();
+        let (a, b) = NEW_TAB_OSC.split_at(9);
+        assert_eq!(count_new_tabs(&mut carry, b"text"), 0);
+        assert_eq!(count_new_tabs(&mut carry, a), 0);
+        assert_eq!(count_new_tabs(&mut carry, b), 1);
+        assert_eq!(count_new_tabs(&mut carry, b"more"), 0, "counted once");
+        let two = [NEW_TAB_OSC, NEW_TAB_OSC].concat();
+        assert_eq!(count_new_tabs(&mut carry, &two), 2);
     }
 
     struct Sink(Arc<Mutex<Vec<u8>>>);

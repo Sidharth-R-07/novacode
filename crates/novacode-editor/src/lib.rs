@@ -153,8 +153,8 @@ pub async fn run(target: Option<PathBuf>) -> io::Result<()> {
                 Some(Err(e)) => return Err(e),
                 None => break,
             },
-            Some(ev) = agent_rx.recv() => app.on_agent(ev),
-            Some(ev) = term_rx.recv() => app.on_term(ev),
+            Some((id, ev)) = agent_rx.recv() => app.on_agent(id, ev),
+            Some((_, ev)) = term_rx.recv() => app.on_term(ev),
             _ = frame_tick.tick(), if app.dirty => {
                 app.dirty = false;
                 guard.term.draw(|f| ui::draw(f, &mut app))?;

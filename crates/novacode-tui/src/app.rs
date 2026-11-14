@@ -631,6 +631,19 @@ impl App {
         }
     }
 
+    /// `/new`: a fresh session. In the panel layout's AI panel it opens in a
+    /// new chat tab and this session carries on untouched.
+    fn new_session(&mut self) {
+        if !crate::window::tabbed() || self.init.attached.is_some() {
+            self.exit = Some(Exit::New);
+            return;
+        }
+        match crate::window::request_tab() {
+            Ok(()) => self.flash("new chat opened in a tab · Alt+1…9 / Alt+, Alt+. switch tabs"),
+            Err(e) => self.tr.notice(format!("/new: cannot open a tab: {e}"), true),
+        }
+    }
+
     fn flash(&mut self, s: impl Into<String>) {
         self.flash = Some((s.into(), Instant::now()));
     }
@@ -1492,7 +1505,7 @@ impl App {
             }
             Some(A::ModelSelect) => self.list_models(),
             Some(A::SessionResume) => self.send(Cmd::ListSessions),
-            Some(A::SessionNew) => self.exit = Some(Exit::New),
+            Some(A::SessionNew) => self.new_session(),
             // pi's Ctrl+O: every tool's output in full, inline; again to fold it back.
             Some(A::ToolsExpand) => {
                 let on = !self.tr.tools_full;
@@ -1848,7 +1861,7 @@ impl App {
                 "/thinking" if !arg.is_empty() => self.set_thinking(arg),
                 "/thinking" => self.pick_thinking(),
                 "/resume" => self.send(Cmd::ListSessions),
-                "/new" => self.exit = Some(Exit::New),
+                "/new" => self.new_session(),
                 "/new-window" => match crate::window::open(&self.init.cwd) {
                     Ok(m) => self.flash(m),
                     Err(e) => self.tr.notice(format!("/new-window: {e}"), true),

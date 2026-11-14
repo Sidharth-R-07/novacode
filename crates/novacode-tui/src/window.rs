@@ -1,9 +1,35 @@
 //! `/new-window`: open another terminal window running novacode's panel layout
-//! (`novacode edit <dir>`) in the same folder.
+//! (`novacode edit <dir>`) in the same folder. Also chat tabs: inside the
+//! panel layout's AI panel, `/new` asks the layout for a new chat tab.
 
 use std::ffi::OsStr;
+use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// The escape sequence (a private OSC) by which a chat hosted in the panel
+/// layout asks it for a new chat tab. The layout reads it off the pty.
+pub const NEW_TAB_OSC: &[u8] = b"\x1b]7771;novacode;new-tab\x07";
+
+static TABBED: AtomicBool = AtomicBool::new(false);
+
+/// Say that this chat runs in the panel layout's AI panel, which hosts chats
+/// as tabs: `/new` then opens a tab instead of replacing the session.
+pub fn set_tabbed(on: bool) {
+    TABBED.store(on, Ordering::Relaxed);
+}
+
+pub fn tabbed() -> bool {
+    TABBED.load(Ordering::Relaxed)
+}
+
+/// Ask the hosting panel layout for a new chat tab.
+pub fn request_tab() -> std::io::Result<()> {
+    let mut out = std::io::stdout();
+    out.write_all(NEW_TAB_OSC)?;
+    out.flush()
+}
 
 /// The program and arguments that open a new terminal window running `cmd`
 /// in `cwd`. `var` reads the environment, `on_path` says whether a program is

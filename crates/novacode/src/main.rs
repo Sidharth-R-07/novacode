@@ -699,6 +699,8 @@ fn wants_panels(cli: &Cli) -> bool {
 
 async fn run(mut cli: Cli, paths: Paths) -> anyhow::Result<ExitCode> {
     let auth_store = AuthStore::new(paths.home().join("auth.json"));
+    // In the panel layout's AI panel, `/new` opens a chat tab there.
+    novacode_tui::window::set_tabbed(std::env::var_os("NOVA_EDIT").is_some());
     if wants_panels(&cli) {
         if let Ok(exe) = std::env::current_exe() {
             novacode_editor::set_agent_program(exe);

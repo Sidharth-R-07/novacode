@@ -5,9 +5,8 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Position, Rect};
-use tokio::sync::mpsc::UnboundedSender;
 
-use crate::agent::{Agent, AgentEvent};
+use crate::agent::{Agent, AgentEvent, EventTx};
 use crate::buffer::Buffer;
 use crate::git;
 use crate::tree::Tree;
@@ -64,8 +63,15 @@ pub struct App {
     pub ai_full: bool,
     pub tree: Tree,
     pub buffer: Buffer,
-    /// The hosted `novacode` chat. `None` when it could not start; see `agent_error`.
-    pub agent: Option<Agent>,
+    /// The hosted `novacode` chats, one per tab (`/new` in a chat or Alt+N opens
+    /// one). Empty when it could not start; see `agent_error`.
+    pub tabs: Vec<Agent>,
+    /// The tab on screen in the AI pane.
+    pub active: usize,
+    next_id: u64,
+    /// Where each tab's label was drawn on the AI pane's top edge (columns
+    /// from, to), so a click can switch tabs. Written by the renderer.
+    pub tab_hits: Vec<(u16, u16)>,
     pub agent_error: Option<String>,
     pub status: String,
     pub should_quit: bool,
@@ -78,7 +84,7 @@ pub struct App {
     /// The shell in the terminal panel; started the first time the panel opens.
     pub term: Option<Agent>,
     pub term_error: Option<String>,
-    term_tx: UnboundedSender<AgentEvent>,
+    term_tx: EventTx,
     /// Last terminal panel size, so the shell starts at the right size.
     pub term_size: (u16, u16),
     /// Where focus goes back to when the terminal panel is left or closed.
@@ -90,7 +96,7 @@ pub struct App {
     last_click: Option<(usize, Instant)>,
     status_at: Instant,
     quit_armed: bool,
-    agent_tx: UnboundedSender<AgentEvent>,
+    agent_tx: EventTx,
     /// Last pane size, so a restart starts at the right size.
     pub agent_size: (u16, u16),
 }
@@ -98,23 +104,13 @@ pub struct App {
 impl App {
     /// `term` is the terminal size, used to guess the AI pane before the first draw.
     /// `term_tx` carries the terminal panel's shell output.
-    pub fn new(
-        root: PathBuf,
-        agent_tx: UnboundedSender<AgentEvent>,
-        term_tx: UnboundedSender<AgentEvent>,
-        term: (u16, u16),
-    ) -> Self {
+    pub fn new(root: PathBuf, agent_tx: EventTx, term_tx: EventTx, term: (u16, u16)) -> Self {
         let mut app = Self::without_agent(root, agent_tx, term_tx, term);
         app.start_agent();
         app
     }
 
-    fn without_agent(
-        root: PathBuf,
-        agent_tx: UnboundedSender<AgentEvent>,
-        term_tx: UnboundedSender<AgentEvent>,
-        term: (u16, u16),
-    ) -> Self {
+    fn without_agent(root: PathBuf, agent_tx: EventTx, term_tx: EventTx, term: (u16, u16)) -> Self {
         let size = (
             (term.1.saturating_sub(3)).max(5),
             (term.0 * 3 / 10).saturating_sub(2).max(20),
@@ -137,7 +133,10 @@ impl App {
             ai_full: false,
             tree: Tree::new(root),
             buffer: Buffer::default(),
-            agent: None,
+            tabs: Vec::new(),
+            active: 0,
+            next_id: 1,
+            tab_hits: Vec::new(),
             agent_error: None,
             status: String::new(),
             should_quit: false,
@@ -149,38 +148,111 @@ impl App {
         }
     }
 
-    fn start_agent(&mut self) {
-        self.agent = None; // drops (kills) a previous one
+    fn spawn_chat(&mut self) -> Result<Agent, String> {
         let (rows, cols) = self.agent_size;
-        match Agent::spawn(&self.tree.root, rows, cols, self.agent_tx.clone()) {
+        let id = self.next_id;
+        self.next_id += 1;
+        Agent::spawn(&self.tree.root, rows, cols, self.agent_tx.clone(), id)
+    }
+
+    /// Start (or restart) the chat in the tab on screen.
+    fn start_agent(&mut self) {
+        self.dirty = true;
+        match self.spawn_chat() {
             Ok(a) => {
-                self.agent = Some(a);
                 self.agent_error = None;
+                // Replacing the old one drops (kills) it.
+                match self.tabs.get_mut(self.active) {
+                    Some(slot) => *slot = a,
+                    None => {
+                        self.tabs.push(a);
+                        self.active = self.tabs.len() - 1;
+                    }
+                }
             }
             Err(e) => self.agent_error = Some(e),
         }
+    }
+
+    /// A new chat in a new tab, shown and focused; the others keep running.
+    pub fn new_tab(&mut self) {
         self.dirty = true;
+        match self.spawn_chat() {
+            Ok(a) => {
+                self.tabs.push(a);
+                self.active = self.tabs.len() - 1;
+                self.show_ai = true;
+                self.focus = Focus::Ai;
+                let n = self.tabs.len();
+                self.set_status(format!("chat {n} opened · Alt+1…9 or Alt+, / Alt+. switch tabs"));
+            }
+            Err(e) => self.set_status(format!("cannot open a chat tab: {e}")),
+        }
+    }
+
+    /// Show tab `i` (0-based) in the AI pane.
+    pub fn switch_tab(&mut self, i: usize) {
+        if i < self.tabs.len() {
+            self.active = i;
+            self.show_ai = true;
+            self.focus = Focus::Ai;
+            self.dirty = true;
+        }
+    }
+
+    /// The next (or previous) tab, wrapping around.
+    fn step_tab(&mut self, forward: bool) {
+        let n = self.tabs.len();
+        if n > 1 {
+            let i = if forward {
+                (self.active + 1) % n
+            } else {
+                (self.active + n - 1) % n
+            };
+            self.switch_tab(i);
+        }
+    }
+
+    /// The chat on screen in the AI pane.
+    pub fn agent(&self) -> Option<&Agent> {
+        self.tabs.get(self.active)
+    }
+
+    pub fn agent_mut(&mut self) -> Option<&mut Agent> {
+        self.tabs.get_mut(self.active)
     }
 
     /// The hosted chat is running and should receive keystrokes.
     pub fn agent_live(&self) -> bool {
-        self.agent.as_ref().is_some_and(|a| !a.exited)
+        self.agent().is_some_and(|a| !a.exited)
     }
 
-    pub fn on_agent(&mut self, ev: AgentEvent) {
+    /// Output and requests from the chat with tag `id`, whichever tab it is in.
+    pub fn on_agent(&mut self, id: u64, ev: AgentEvent) {
+        let Some(i) = self.tabs.iter().position(|a| a.id == id) else {
+            return; // a chat already closed
+        };
         self.dirty = true;
-        if let Some(a) = self.agent.as_mut() {
-            match ev {
-                AgentEvent::Output(bytes) => a.feed(&bytes),
-                AgentEvent::Exited => {
-                    a.exited = true;
-                    // `/quit` in the AI panel closes the window, as in novacode alone,
-                    // unless the editor has unsaved changes (then Enter restarts the chat).
-                    if self.buffer.modified {
-                        self.set_status("novacode quit; unsaved changes: Ctrl+S to save, Ctrl+Q to quit");
-                    } else {
-                        self.should_quit = true;
-                    }
+        match ev {
+            AgentEvent::Output(bytes) => self.tabs[i].feed(&bytes),
+            AgentEvent::NewTab => self.new_tab(),
+            AgentEvent::Exited if self.tabs.len() > 1 => {
+                // `/quit` in one of several tabs closes that tab only.
+                self.tabs.remove(i);
+                if self.active > i || self.active >= self.tabs.len() {
+                    self.active = self.active.saturating_sub(1);
+                }
+                let left = self.tabs.len();
+                self.set_status(format!("chat tab closed; {left} left"));
+            }
+            AgentEvent::Exited => {
+                self.tabs[i].exited = true;
+                // `/quit` in the AI panel closes the window, as in novacode alone,
+                // unless the editor has unsaved changes (then Enter restarts the chat).
+                if self.buffer.modified {
+                    self.set_status("novacode quit; unsaved changes: Ctrl+S to save, Ctrl+Q to quit");
+                } else {
+                    self.should_quit = true;
                 }
             }
         }
@@ -209,6 +281,7 @@ impl App {
     pub fn on_term(&mut self, ev: AgentEvent) {
         self.dirty = true;
         match ev {
+            AgentEvent::NewTab => {}
             AgentEvent::Output(bytes) => {
                 if let Some(t) = self.term.as_mut() {
                     t.feed(&bytes);
@@ -326,7 +399,7 @@ impl App {
         }
         match self.focus {
             Focus::Ai => {
-                if let (true, Some(a)) = (self.agent_live(), self.agent.as_ref()) {
+                if let (true, Some(a)) = (self.agent_live(), self.agent()) {
                     a.send_paste(text);
                 }
             }
@@ -385,13 +458,14 @@ impl App {
                 self.fix_layout(Focus::Editor);
             } else if self.focus == Focus::Ai
                 && self.agent_live()
-                && let Some(a) = self.agent.as_mut()
+                && let Some(a) = self.agent_mut()
             {
                 a.send_key(k);
             }
             return;
         }
-        // F11 or Alt+Z: the AI pane full screen and back. Alt+E: hide/show the editor.
+        // F11 or Alt+Z: the AI pane full screen and back. Alt+E: hide/show the
+        // editor, Alt+T the file tree (Alt+B is word-left in the chat).
         if k.code == KeyCode::F(11) || (k.modifiers == KeyModifiers::ALT && k.code == KeyCode::Char('z')) {
             self.toggle_ai_full();
             return;
@@ -399,6 +473,28 @@ impl App {
         if k.modifiers == KeyModifiers::ALT && k.code == KeyCode::Char('e') {
             self.toggle_editor();
             return;
+        }
+        if k.modifiers == KeyModifiers::ALT && k.code == KeyCode::Char('t') {
+            self.toggle_tree();
+            return;
+        }
+        // Chat tabs: Alt+N a new one, Alt+1…9 go to one, Alt+, / Alt+. the previous / next.
+        if k.modifiers == KeyModifiers::ALT || k.modifiers == KeyModifiers::ALT | KeyModifiers::SHIFT {
+            match k.code {
+                KeyCode::Char('n' | 'N') => return self.new_tab(),
+                KeyCode::Char(c @ '1'..='9') => {
+                    let i = usize::from(c as u8 - b'1');
+                    if i < self.tabs.len() {
+                        self.switch_tab(i);
+                    } else {
+                        self.set_status(format!("no chat tab {}", i + 1));
+                    }
+                    return;
+                }
+                KeyCode::Char(',' | '<') => return self.step_tab(false),
+                KeyCode::Char('.' | '>') => return self.step_tab(true),
+                _ => {}
+            }
         }
         // Alt+←/→ go to the pane on that side. novacode also moves by word with
         // Ctrl+←/→, so the AI pane loses nothing.
@@ -421,7 +517,7 @@ impl App {
 
         // The AI pane is the real novacode: it gets every other key untouched.
         if self.focus == Focus::Ai && self.agent_live() {
-            if let Some(a) = self.agent.as_mut() {
+            if let Some(a) = self.agent_mut() {
                 a.send_key(k);
             }
             return;
@@ -718,6 +814,7 @@ impl App {
                     self.last_click = None;
                 }
                 match pane {
+                    Focus::Ai if self.click_tab(m.column, m.row) => {}
                     Focus::Ai => self.mouse_to_agent(m),
                     Focus::Term => self.mouse_to_term(m),
                     Focus::Tree if button == MouseButton::Left => self.click_tree(m.row),
@@ -813,7 +910,21 @@ impl App {
     /// pinned to its edge, as a terminal does.
     fn mouse_to_agent(&self, m: MouseEvent) {
         if self.agent_live() {
-            mouse_to(self.agent.as_ref(), self.panes.ai_inner, m);
+            mouse_to(self.agent(), self.panes.ai_inner, m);
+        }
+    }
+
+    /// A click on a tab label on the AI pane's top edge shows that tab.
+    fn click_tab(&mut self, col: u16, row: u16) -> bool {
+        if self.panes.ai.is_none_or(|r| r.y != row) {
+            return false;
+        }
+        match self.tab_hits.iter().position(|&(from, to)| (from..to).contains(&col)) {
+            Some(i) => {
+                self.switch_tab(i);
+                true
+            }
+            None => false,
         }
     }
 
@@ -946,7 +1057,7 @@ mod tests {
     /// A scratch project; removed on drop. Holds the agent channel open.
     struct Scratch {
         dir: PathBuf,
-        _rx: tokio::sync::mpsc::UnboundedReceiver<AgentEvent>,
+        _rx: tokio::sync::mpsc::UnboundedReceiver<(u64, AgentEvent)>,
     }
 
     impl Drop for Scratch {
@@ -967,7 +1078,7 @@ mod tests {
         std::fs::write(dir.join("long.txt"), long).unwrap();
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let mut app = App::without_agent(dir.clone(), tx.clone(), tx.clone(), (120, 30));
-        app.agent = Some(Agent::spawn_program("cat", &dir, 27, 34, tx).unwrap());
+        app.tabs.push(Agent::spawn_program("cat", &dir, 27, 34, tx, 0).unwrap());
         draw(&mut app);
         (app, Scratch { dir, _rx: rx })
     }
@@ -998,6 +1109,57 @@ mod tests {
 
     fn middle(r: Rect) -> (u16, u16) {
         (r.x + r.width / 2, r.y + r.height / 2)
+    }
+
+    /// `app` with two more `cat` chats as tabs (ids 1 and 2), the first on screen.
+    fn tabbed(name: &str) -> (App, Scratch) {
+        let (mut app, s) = app(name);
+        let tx = app.agent_tx.clone();
+        for id in 1..=2 {
+            app.tabs
+                .push(Agent::spawn_program("cat", &s.dir, 27, 34, tx.clone(), id).unwrap());
+        }
+        draw(&mut app);
+        (app, s)
+    }
+
+    #[test]
+    fn chat_tabs_switch_with_keys_and_clicks() {
+        let (mut app, _s) = tabbed("tabs");
+        assert_eq!((app.tabs.len(), app.active), (3, 0));
+        assert_eq!(app.tab_hits.len(), 3, "three tab labels drawn");
+        key(&mut app, KeyCode::Char('3'), KeyModifiers::ALT);
+        assert_eq!((app.active, app.focus), (2, Focus::Ai));
+        key(&mut app, KeyCode::Char('.'), KeyModifiers::ALT);
+        assert_eq!(app.active, 0, "next wraps around");
+        key(&mut app, KeyCode::Char(','), KeyModifiers::ALT);
+        assert_eq!(app.active, 2, "previous wraps around");
+        key(&mut app, KeyCode::Char('9'), KeyModifiers::ALT);
+        assert_eq!(app.active, 2, "no tab 9");
+        draw(&mut app);
+        let (from, _) = app.tab_hits[1];
+        let row = app.panes.ai.unwrap().y;
+        click(&mut app, (from, row));
+        assert_eq!(app.active, 1, "a click on a label shows that tab");
+    }
+
+    #[test]
+    fn quitting_one_of_several_chats_closes_its_tab_only() {
+        let (mut app, _s) = tabbed("tabquit");
+        app.switch_tab(2);
+        app.on_agent(1, AgentEvent::Output(b"hi".to_vec()));
+        app.on_agent(1, AgentEvent::Exited);
+        assert!(!app.should_quit);
+        assert_eq!(app.tabs.len(), 2);
+        assert_eq!(
+            (app.active, app.tabs[app.active].id),
+            (1, 2),
+            "the same chat stays on screen"
+        );
+        app.on_agent(2, AgentEvent::Exited);
+        assert_eq!((app.tabs.len(), app.active), (1, 0));
+        app.on_agent(0, AgentEvent::Exited);
+        assert!(app.should_quit, "the last chat quitting closes the window");
     }
 
     #[test]
@@ -1099,7 +1261,7 @@ mod tests {
     fn ctrl_esc_opens_the_terminal_panel_at_the_bottom() {
         let (mut app, s) = app("term");
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        app.term = Some(Agent::spawn_program("cat", &s.dir, 8, 100, tx).unwrap());
+        app.term = Some(Agent::spawn_program("cat", &s.dir, 8, 100, tx, 0).unwrap());
         app.focus = Focus::Ai;
         key(&mut app, KeyCode::Esc, KeyModifiers::CONTROL);
         draw(&mut app);
@@ -1133,5 +1295,16 @@ mod tests {
         assert_eq!(app.focus, Focus::Tree, "the hidden editor is skipped");
         app.open_path(&s.dir.join("a.txt"), true);
         assert!(app.show_editor && app.focus == Focus::Editor, "opening a file shows it");
+    }
+
+    #[test]
+    fn the_tree_can_be_hidden_from_the_ai_pane() {
+        let (mut app, _s) = app("notree");
+        app.focus = Focus::Ai;
+        key(&mut app, KeyCode::Char('t'), KeyModifiers::ALT);
+        assert!(!app.show_tree);
+        assert_eq!(app.focus, Focus::Ai, "hiding the tree keeps the focus");
+        key(&mut app, KeyCode::Char('t'), KeyModifiers::ALT);
+        assert!(app.show_tree && app.focus == Focus::Tree, "Alt+T shows it again");
     }
 }

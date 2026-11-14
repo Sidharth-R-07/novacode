@@ -4,6 +4,11 @@ All notable changes to novacode. Versions follow [semantic versioning](https://s
 
 ## [Unreleased]
 
+### Added
+
+- `Alt+T` hides or shows the file tree in the panel layout, from the AI panel too.
+- Chat tabs in the panel layout: `/new` in the AI panel opens a new chat in a tab without stopping the current one. Switch with a click on the tab numbers, `Alt+1`…`Alt+9` or `Alt+,` / `Alt+.`; `Alt+N` opens a chat from any panel; `/quit` closes just that tab.
+
 ## [0.9.5] - 2026-11-13
 
 ### Changed

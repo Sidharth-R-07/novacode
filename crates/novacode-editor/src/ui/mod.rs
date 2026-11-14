@@ -5,6 +5,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
+use unicode_width::UnicodeWidthStr;
 
 use crate::app::{App, Focus, GitView, Overlay, Panes};
 use crate::buffer::visible_slice;
@@ -158,6 +159,7 @@ fn draw_editor(f: &mut Frame, app: &mut App, area: Rect) {
             Line::from("leave it with Alt+←, Ctrl+Space or a click on another pane."),
             Line::from(""),
             Line::from("F11 or Alt+Z: AI chat full screen. Alt+E (Ctrl+E here): hide the editor."),
+            Line::from("Alt+T (Ctrl+B here): hide the file tree."),
         ])
         .style(Style::new().fg(Color::DarkGray))
         .wrap(ratatui::widgets::Wrap { trim: false });
@@ -242,8 +244,9 @@ fn draw_ai(f: &mut Frame, app: &mut App, area: Rect) {
     app.agent_size = (inner.height, inner.width);
     app.panes.ai = Some(area);
     app.panes.ai_inner = inner;
+    draw_tabs(f, app, area, title);
 
-    let Some(agent) = app.agent.as_mut() else {
+    let Some(agent) = app.agent_mut() else {
         let msg = app.agent_error.clone().unwrap_or_default();
         let lines = vec![
             Line::styled(msg, Style::new().fg(Color::Yellow)),
@@ -275,6 +278,40 @@ fn draw_ai(f: &mut Frame, app: &mut App, area: Rect) {
         if r < inner.height && c < inner.width {
             f.set_cursor_position((inner.x + c, inner.y + r));
         }
+    }
+}
+
+/// With more than one chat, their tabs on the AI pane's top edge, after the
+/// title: ` 1 ` ` 2 `…, the one on screen highlighted. Clicks find them
+/// through `app.tab_hits`.
+fn draw_tabs(f: &mut Frame, app: &mut App, area: Rect, title: &str) {
+    app.tab_hits.clear();
+    if app.tabs.len() < 2 || area.height == 0 {
+        return;
+    }
+    let focused = app.focus == Focus::Ai;
+    // The title is drawn as " {title} " from one column in.
+    let mut x = area.x + 1 + u16::try_from(title.width()).unwrap_or(u16::MAX).saturating_add(3);
+    let end = area.right().saturating_sub(1);
+    let buf = f.buffer_mut();
+    for i in 0..app.tabs.len() {
+        let label = format!(" {} ", i + 1);
+        let w = u16::try_from(label.width()).unwrap_or(u16::MAX);
+        if x.saturating_add(w) > end {
+            break;
+        }
+        let exited = app.tabs[i].exited;
+        let style = if i == app.active {
+            let bg = if focused { Color::Cyan } else { Color::Gray };
+            Style::new().bg(bg).fg(Color::Black).add_modifier(Modifier::BOLD)
+        } else if exited {
+            Style::new().fg(Color::DarkGray).add_modifier(Modifier::CROSSED_OUT)
+        } else {
+            Style::new().fg(Color::Gray)
+        };
+        buf.set_string(x, area.y, &label, style);
+        app.tab_hits.push((x, x + w));
+        x += w + 1;
     }
 }
 
@@ -517,11 +554,11 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
     let tail = if !app.status.is_empty() {
         app.status.clone()
     } else if app.focus == Focus::Ai && app.agent_live() {
-        "keys go to novacode · leave Alt+←/Ctrl+Space/click · F11 full · Alt+E editor · Ctrl+Esc terminal".to_string()
+        "keys go to novacode · leave Alt+←/Ctrl+Space/click · F11 full · Alt+N new chat · Alt+1…9 tabs · Alt+E editor · Alt+T tree · Ctrl+Esc terminal".to_string()
     } else if app.focus == Focus::Term && app.term_live() {
         "keys go to the shell · Ctrl+Esc hide · leave Alt+↑/Ctrl+Space/click · wheel scrolls back".to_string()
     } else {
-        "Tab/Alt+←→/click focus · ^B tree · ^E editor · ^J AI · F11 full AI · ^S save · ^Esc/^T terminal · ^G git"
+        "Tab/Alt+←→/click focus · ^B/Alt+T tree · ^E editor · ^J AI · F11 full AI · ^S save · ^Esc/^T terminal · ^G git"
             .to_string()
     };
     let color = if app.status.is_empty() {
